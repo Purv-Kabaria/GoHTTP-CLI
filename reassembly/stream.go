@@ -3,7 +3,6 @@ package reassembly
 import (
 	"bufio"
 	"io"
-	"log"
 	"net/http"
 	"time"
 
@@ -31,13 +30,28 @@ func (f *HTTPStreamFactory) parseStream(net, transport gopacket.Flow, stream *tc
 	dstPort := transport.Dst().String()
 
 	if dstPort == "80" {
-		f.handleRequest(net, transport, buf)
+		f.handleHTTPRequest(net, transport, buf)
 	} else if srcPort == "80" {
-		f.handleResponse(net, transport, buf)
+		f.handleHTTPResponse(net, transport, buf)
+	} else if dstPort == "443" {
+		f.handleTLSClientHello(net, transport, buf)
+	} else if srcPort == "443" {
+		f.handleTLSServerHello(net, transport, buf)
 	}
 }
 
-func (f *HTTPStreamFactory) handleRequest(net, transport gopacket.Flow, buf *bufio.Reader) {
+func readBody(r io.ReadCloser) []byte {
+	if r == nil {
+		return nil
+	}
+	defer r.Close()
+	lr := io.LimitReader(r, 8192)
+	b, _ := io.ReadAll(lr)
+	io.Copy(io.Discard, r)
+	return b
+}
+
+func (f *HTTPStreamFactory) handleHTTPRequest(net, transport gopacket.Flow, buf *bufio.Reader) {
 	connID := net.Src().String() + ":" + transport.Src().String() + "-" + net.Dst().String() + ":" + transport.Dst().String()
 
 	for {
@@ -45,12 +59,12 @@ func (f *HTTPStreamFactory) handleRequest(net, transport gopacket.Flow, buf *buf
 		if err == io.EOF {
 			return
 		} else if err != nil {
-			log.Printf("Req Parse Error [%s]: %v\n", connID, err)
 			return
 		}
 
 		tx := models.HTTPTransaction{
 			ID:          connID,
+			Protocol:    "HTTP",
 			Method:      req.Method,
 			Host:        req.Host,
 			Path:        req.URL.Path,
@@ -59,10 +73,9 @@ func (f *HTTPStreamFactory) handleRequest(net, transport gopacket.Flow, buf *buf
 			SourcePort:  transport.Src().String(),
 			DestIP:      net.Dst().String(),
 			DestPort:    transport.Dst().String(),
+			ReqHeaders:  req.Header.Clone(),
+			ReqBody:     readBody(req.Body),
 		}
-
-		io.Copy(io.Discard, req.Body)
-		req.Body.Close()
 
 		if completedTx, ok := f.Tracker.AddRequest(connID, tx); ok {
 			f.Transactions <- *completedTx
@@ -70,7 +83,7 @@ func (f *HTTPStreamFactory) handleRequest(net, transport gopacket.Flow, buf *buf
 	}
 }
 
-func (f *HTTPStreamFactory) handleResponse(net, transport gopacket.Flow, buf *bufio.Reader) {
+func (f *HTTPStreamFactory) handleHTTPResponse(net, transport gopacket.Flow, buf *bufio.Reader) {
 	connID := net.Dst().String() + ":" + transport.Dst().String() + "-" + net.Src().String() + ":" + transport.Src().String()
 
 	for {
@@ -78,22 +91,65 @@ func (f *HTTPStreamFactory) handleResponse(net, transport gopacket.Flow, buf *bu
 		if err == io.EOF {
 			return
 		} else if err != nil {
-			log.Printf("Res Parse Error [%s]: %v\n", connID, err)
 			return
 		}
 
 		tx := models.HTTPTransaction{
 			StatusCode:    res.StatusCode,
 			ContentLength: res.ContentLength,
+			ResHeaders:    res.Header.Clone(),
+			ResBody:       readBody(res.Body),
 		}
-		
-		responseTime := time.Now()
 
-		io.Copy(io.Discard, res.Body)
-		res.Body.Close()
+		responseTime := time.Now()
 
 		if completedTx, ok := f.Tracker.AddResponse(connID, tx, responseTime); ok {
 			f.Transactions <- *completedTx
 		}
 	}
+}
+
+func (f *HTTPStreamFactory) handleTLSClientHello(net, transport gopacket.Flow, buf *bufio.Reader) {
+	connID := net.Src().String() + ":" + transport.Src().String() + "-" + net.Dst().String() + ":" + transport.Dst().String()
+
+	sni, err := ExtractSNI(buf)
+	if err != nil {
+		io.Copy(io.Discard, buf)
+		return
+	}
+
+	tx := models.HTTPTransaction{
+		ID:          connID,
+		Protocol:    "HTTPS",
+		Method:      "HTTPS",
+		Host:        sni,
+		Path:        "/* Encrypted */",
+		RequestTime: time.Now(),
+		SourceIP:    net.Src().String(),
+		SourcePort:  transport.Src().String(),
+		DestIP:      net.Dst().String(),
+		DestPort:    transport.Dst().String(),
+	}
+
+	if completedTx, ok := f.Tracker.AddRequest(connID, tx); ok {
+		f.Transactions <- *completedTx
+	}
+	
+	io.Copy(io.Discard, buf)
+}
+
+func (f *HTTPStreamFactory) handleTLSServerHello(net, transport gopacket.Flow, buf *bufio.Reader) {
+	connID := net.Dst().String() + ":" + transport.Dst().String() + "-" + net.Src().String() + ":" + transport.Src().String()
+
+	tx := models.HTTPTransaction{
+		StatusCode: 0, 
+	}
+
+	responseTime := time.Now()
+
+	if completedTx, ok := f.Tracker.AddResponse(connID, tx, responseTime); ok {
+		f.Transactions <- *completedTx
+	}
+
+	io.Copy(io.Discard, buf)
 }

@@ -44,7 +44,7 @@ func main() {
 
 	fmt.Println("Initializing Network Inspector...")
 	iface := getActiveInterface()
-	filter := "tcp and port 80"
+	filter := "tcp and (port 80 or port 443)"
 
 	fmt.Printf("\nBinding to interface: %s\n", iface)
 	fmt.Printf("BPF Filter active: %s\n", filter)

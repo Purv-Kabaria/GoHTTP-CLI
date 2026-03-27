@@ -31,6 +31,7 @@ func (t *TransactionTracker) AddRequest(connID string, reqTx models.HTTPTransact
 	defer state.mu.Unlock()
 
 	state.Tx.ID = reqTx.ID
+	state.Tx.Protocol = reqTx.Protocol
 	state.Tx.Method = reqTx.Method
 	state.Tx.Host = reqTx.Host
 	state.Tx.Path = reqTx.Path
@@ -39,11 +40,17 @@ func (t *TransactionTracker) AddRequest(connID string, reqTx models.HTTPTransact
 	state.Tx.SourcePort = reqTx.SourcePort
 	state.Tx.DestIP = reqTx.DestIP
 	state.Tx.DestPort = reqTx.DestPort
+	state.Tx.ReqHeaders = reqTx.ReqHeaders
+	state.Tx.ReqBody = reqTx.ReqBody
 	state.ReqParsed = true
 
 	if state.ResParsed {
 		t.pending.Delete(connID)
-		state.Tx.Duration = state.ResTime.Sub(state.Tx.RequestTime)
+		dur := state.ResTime.Sub(state.Tx.RequestTime)
+		if dur < 0 {
+			dur = -dur
+		}
+		state.Tx.Duration = dur
 		return &state.Tx, true
 	}
 	return nil, false
@@ -58,12 +65,18 @@ func (t *TransactionTracker) AddResponse(connID string, resTx models.HTTPTransac
 
 	state.Tx.StatusCode = resTx.StatusCode
 	state.Tx.ContentLength = resTx.ContentLength
+	state.Tx.ResHeaders = resTx.ResHeaders
+	state.Tx.ResBody = resTx.ResBody
 	state.ResTime = resTime
 	state.ResParsed = true
 
 	if state.ReqParsed {
 		t.pending.Delete(connID)
-		state.Tx.Duration = state.ResTime.Sub(state.Tx.RequestTime)
+		dur := state.ResTime.Sub(state.Tx.RequestTime)
+		if dur < 0 {
+			dur = -dur
+		}
+		state.Tx.Duration = dur
 		return &state.Tx, true
 	}
 	return nil, false

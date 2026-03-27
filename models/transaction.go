@@ -1,9 +1,13 @@
 package models
 
-import "time"
+import (
+	"net/http"
+	"time"
+)
 
 type HTTPTransaction struct {
 	ID            string
+	Protocol      string
 	Method        string
 	Host          string
 	Path          string
@@ -15,4 +19,8 @@ type HTTPTransaction struct {
 	SourcePort    string
 	DestIP        string
 	DestPort      string
+	ReqHeaders    http.Header
+	ResHeaders    http.Header
+	ReqBody       []byte
+	ResBody       []byte
 }
