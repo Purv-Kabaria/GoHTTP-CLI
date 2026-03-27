@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -36,6 +37,10 @@ func getActiveInterface() string {
 }
 
 func main() {
+	ifaceFlag := flag.String("i", "", "Network interface to listen on (default: auto-detect)")
+	filterFlag := flag.String("f", "tcp and (port 80 or port 443)", "BPF filter to apply")
+	flag.Parse()
+
 	logFile, err := os.OpenFile("inspector.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 	if err == nil {
 		log.SetOutput(logFile)
@@ -43,8 +48,13 @@ func main() {
 	}
 
 	fmt.Println("Initializing Network Inspector...")
-	iface := getActiveInterface()
-	filter := "tcp and (port 80 or port 443)"
+	
+	iface := *ifaceFlag
+	if iface == "" {
+		iface = getActiveInterface()
+	}
+	
+	filter := *filterFlag
 
 	fmt.Printf("\nBinding to interface: %s\n", iface)
 	fmt.Printf("BPF Filter active: %s\n", filter)
@@ -90,7 +100,7 @@ func main() {
 		}
 	}()
 
-	p := tea.NewProgram(ui.New(txChan))
+	p := tea.NewProgram(ui.New(txChan), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		log.Fatal(err)
 	}
