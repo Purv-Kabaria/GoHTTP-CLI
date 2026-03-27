@@ -1,7 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"log"
+	"os"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -34,8 +36,20 @@ func getActiveInterface() string {
 }
 
 func main() {
+	logFile, err := os.OpenFile("inspector.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	if err == nil {
+		log.SetOutput(logFile)
+		defer logFile.Close()
+	}
+
+	fmt.Println("Initializing Network Inspector...")
 	iface := getActiveInterface()
 	filter := "tcp and port 80"
+
+	fmt.Printf("\nBinding to interface: %s\n", iface)
+	fmt.Printf("BPF Filter active: %s\n", filter)
+	fmt.Println("\nStarting UI in 3 seconds...")
+	time.Sleep(3 * time.Second)
 
 	txChan := make(chan models.HTTPTransaction, 100)
 
@@ -44,12 +58,16 @@ func main() {
 		log.Fatal(err)
 	}
 
-	streamFactory := &reassembly.HTTPStreamFactory{Transactions: txChan}
+	tracker := reassembly.NewTransactionTracker()
+	streamFactory := &reassembly.HTTPStreamFactory{
+		Transactions: txChan,
+		Tracker:      tracker,
+	}
 	streamPool := tcpassembly.NewStreamPool(streamFactory)
 	assembler := tcpassembly.NewAssembler(streamPool)
 
 	go func() {
-		ticker := time.NewTicker(time.Minute)
+		ticker := time.NewTicker(time.Second * 2)
 		defer ticker.Stop()
 
 		for {
@@ -67,7 +85,7 @@ func main() {
 					)
 				}
 			case <-ticker.C:
-				assembler.FlushOlderThan(time.Now().Add(-time.Minute * 2))
+				assembler.FlushOlderThan(time.Now().Add(-time.Second * 5))
 			}
 		}
 	}()

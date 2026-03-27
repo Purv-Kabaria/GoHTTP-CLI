@@ -1,12 +1,13 @@
 package capture
 
 import (
+	"time"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/pcap"
 )
 
 func NewPacketSource(iface, filter string) (*gopacket.PacketSource, error) {
-	handle, err := pcap.OpenLive(iface, 1600, true, pcap.BlockForever)
+	handle, err := pcap.OpenLive(iface, 1600, true, time.Millisecond*10)
 	if err != nil {
 		return nil, err
 	}

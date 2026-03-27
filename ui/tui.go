@@ -8,6 +8,14 @@ import (
 	"httpinspector/models"
 )
 
+// Truncate long IPv6 addresses to maintain UI columns
+func formatStr(s string, max int) string {
+	if len(s) > max {
+		return s[:max-3] + "..."
+	}
+	return fmt.Sprintf("%-*s", max, s)
+}
+
 type Model struct {
 	transactions []models.HTTPTransaction
 	txChan       <-chan models.HTTPTransaction
@@ -41,8 +49,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) View() string {
 	s := "Live HTTP Traffic\n\n"
+	s += fmt.Sprintf("%-18s %-6s %-30s %-8s %s\n", "CLIENT IP", "METHOD", "HOST", "STATUS", "LATENCY")
+	s += "--------------------------------------------------------------------------------\n"
+
 	for _, tx := range m.transactions {
-		s += fmt.Sprintf("[%s] %s %s%s\n", tx.SourceIP, tx.Method, tx.Host, tx.Path)
+		ip := formatStr(tx.SourceIP, 18)
+		host := formatStr(tx.Host, 30)
+		status := fmt.Sprintf("%d", tx.StatusCode)
+		latency := fmt.Sprintf("%dms", tx.Duration.Milliseconds())
+		
+		s += fmt.Sprintf("%-18s %-6s %-30s %-8s %s\n", ip, tx.Method, host, status, latency)
 	}
 	s += "\nPress q to quit.\n"
 	return s
